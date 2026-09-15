@@ -213,7 +213,7 @@ test('action-first: the SFTP spawner opens the host picker, then a live session'
 }) => {
   await boot(page);
 
-  await page.getByRole('button', { name: 'SFTP', exact: true }).click();
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
   await page.getByRole('dialog').getByText('web-1', { exact: true }).click();
 
   await expect(page.getByRole('button', { name: 'web-1 · sftp', exact: true })).toBeVisible();

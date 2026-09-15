@@ -35,7 +35,10 @@
     { kind: 'snippets', label: 'Snippets', icon: 'snippets' }
   ];
   const spawners: Spawner[] = [
-    { kind: 'sftp', label: 'SFTP', icon: 'sftp' },
+    // Label says "Files", not "SFTP": the session itself is protocol-agnostic —
+    // it connects over SFTP, FTP or FTPS depending on the picked host's file
+    // access setting (`kind: 'sftp'` is just this tab type's internal name).
+    { kind: 'sftp', label: 'Files', icon: 'sftp' },
     { kind: 'terminal', label: 'Terminal', icon: 'terminal' }
   ];
 

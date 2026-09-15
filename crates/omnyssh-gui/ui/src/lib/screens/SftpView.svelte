@@ -282,7 +282,7 @@
 <div class="absolute inset-0 flex flex-col bg-surface pt-[var(--titlebar-h)] {active ? '' : 'hidden'}">
   {#if openError}
     <div class="flex flex-1 flex-col items-center justify-center gap-2 p-10 text-center">
-      <p class="font-medium">Could not open SFTP on {session.hostName}</p>
+      <p class="font-medium">Could not open Files on {session.hostName}</p>
       <p class="max-w-md text-sm text-muted">{openError}</p>
     </div>
   {:else if !view}
