@@ -97,6 +97,9 @@ fn upsert(hosts: &mut Vec<Host>, input: HostInputDto, imported: Option<Host>) {
     // An omitted monitoring mode means "unchanged", not "back to SSH" — losing it
     // would silently start logging in to a device chosen for reachability only.
     let monitoring_given = input.monitoring.is_some();
+    // Same reasoning for file access: an omitted value must not silently reset an
+    // FTP-only host back to SFTP, which it likely can't even do.
+    let file_access_given = input.file_access.is_some();
     let mut host = Host::from(input);
     match hosts.iter().position(|h| h.name == host.name) {
         Some(i) => {
@@ -104,6 +107,9 @@ fn upsert(hosts: &mut Vec<Host>, input: HostInputDto, imported: Option<Host>) {
             if !monitoring_given {
                 host.monitoring = existing.monitoring;
                 host.monitor_port = existing.monitor_port;
+            }
+            if !file_access_given {
+                host.file_access = existing.file_access;
             }
             host.password = host.password.or_else(|| existing.password.clone());
             host.identity_file = host
@@ -178,6 +184,7 @@ mod tests {
             notes: None,
             monitoring: None,
             monitor_port: None,
+            file_access: None,
         }
     }
 
@@ -319,6 +326,43 @@ mod tests {
         upsert(&mut hosts, back_to_ssh, None);
 
         assert_eq!(hosts[0].monitoring, MonitorMode::Ssh);
+    }
+
+    #[test]
+    fn upsert_keeps_a_file_access_the_payload_left_out() {
+        use omnyssh_core::ssh::client::FileAccess;
+
+        let mut hosts = vec![Host {
+            name: "nas".to_string(),
+            file_access: FileAccess::Ftp,
+            source: HostSource::Manual,
+            ..Host::default()
+        }];
+
+        upsert(&mut hosts, input("nas"), None);
+
+        // Silently reverting to SFTP would break the Files tab on a device that
+        // likely has no SFTP subsystem — the whole reason the field was set.
+        assert_eq!(hosts[0].file_access, FileAccess::Ftp);
+    }
+
+    #[test]
+    fn upsert_applies_a_file_access_the_payload_carries() {
+        use crate::dto::FileAccessDto;
+        use omnyssh_core::ssh::client::FileAccess;
+
+        let mut hosts = vec![Host {
+            name: "nas".to_string(),
+            file_access: FileAccess::Ftp,
+            source: HostSource::Manual,
+            ..Host::default()
+        }];
+
+        let mut back_to_sftp = input("nas");
+        back_to_sftp.file_access = Some(FileAccessDto::Sftp);
+        upsert(&mut hosts, back_to_sftp, None);
+
+        assert_eq!(hosts[0].file_access, FileAccess::Sftp);
     }
 
     #[test]

@@ -38,6 +38,33 @@ impl MonitorMode {
     }
 }
 
+/// How a host's Files tab connects for file transfer.
+///
+/// Independent of the shell connection: some devices (routers, NAS boxes,
+/// embedded Linux) answer SSH for a shell but have no SFTP subsystem, and
+/// only expose plain FTP for file access.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FileAccess {
+    /// SFTP over the same SSH connection used for the shell — the default.
+    #[default]
+    Sftp,
+    /// Plain FTP.
+    Ftp,
+    /// FTP with explicit TLS (`AUTH TLS`, RFC 4217). Implicit FTPS (port 990)
+    /// is deprecated and not supported.
+    Ftps,
+    /// No file transfer for this host; the Files tab is disabled.
+    None,
+}
+
+impl FileAccess {
+    /// Lets the default stay out of `hosts.toml` entirely.
+    fn is_sftp(&self) -> bool {
+        matches!(self, Self::Sftp)
+    }
+}
+
 /// A single host entry used for SSH connections.
 ///
 /// Populated either from `~/.ssh/config` (via the parser) or from
@@ -82,6 +109,9 @@ pub struct Host {
     /// Port for the reachability probe. Falls back to `port` when unset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub monitor_port: Option<u16>,
+    /// How the Files tab connects for this host.
+    #[serde(default, skip_serializing_if = "FileAccess::is_sftp")]
+    pub file_access: FileAccess,
 
     // -----------------------------------------------------------------------
     // Auto SSH Key Setup metadata
@@ -120,6 +150,7 @@ impl Default for Host {
             original_ssh_host: None,
             monitoring: MonitorMode::default(),
             monitor_port: None,
+            file_access: FileAccess::default(),
             key_setup_date: None,
             password_auth_disabled: None,
         }
@@ -157,6 +188,33 @@ mod tests {
         let written = toml::to_string(&host).expect("serialize");
         assert!(!written.contains("monitoring"), "{written}");
         assert!(!written.contains("monitor_port"), "{written}");
+    }
+
+    /// Same guarantee as the monitoring default, for `file_access`: existing
+    /// files predate it and must round-trip without gaining the field.
+    #[test]
+    fn the_file_access_default_round_trips_without_touching_the_file() {
+        let host: Host = toml::from_str("name = \"web\"\nhostname = \"10.0.0.1\"\n")
+            .expect("a host without file_access still parses");
+        assert_eq!(host.file_access, FileAccess::Sftp);
+
+        let written = toml::to_string(&host).expect("serialize");
+        assert!(!written.contains("file_access"), "{written}");
+    }
+
+    /// A host whose Files tab was pointed at plain FTP persists that choice.
+    #[test]
+    fn a_non_default_file_access_persists() {
+        let host = Host {
+            name: String::from("nas"),
+            hostname: String::from("10.0.0.5"),
+            file_access: FileAccess::Ftp,
+            ..Host::default()
+        };
+
+        let written = toml::to_string(&host).expect("serialize");
+        let read: Host = toml::from_str(&written).expect("deserialize");
+        assert_eq!(read.file_access, FileAccess::Ftp);
     }
 
     /// The wire and the TUI form spell the mode differently, so a hand-edited

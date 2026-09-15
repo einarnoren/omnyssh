@@ -422,6 +422,11 @@ export type ConnectionStatusDto = { kind: "unknown" } | { kind: "connecting" } |
  */
 export type Error = { message: string }
 /**
+ * How a host's Files tab connects for file transfer, mirrors
+ * `omnyssh_core::ssh::client::FileAccess`. `None` disables the Files tab.
+ */
+export type FileAccessDto = "sftp" | "ftp" | "ftps" | "none"
+/**
  * A file or directory in an SFTP panel listing (tech-gui.md §4.1). Maps from the
  * core `FileEntry`; `path` is the absolute path the frontend marks entries by.
  */
@@ -436,7 +441,7 @@ export type FilePreview = { sessionId: number; path: string; content: string }
  * (tech-gui.md §3.4). `hasKey` reports whether an identity file is configured;
  * the key path itself never crosses the boundary.
  */
-export type HostDto = { name: string; hostname: string; user: string; port: number; tags: string[]; notes?: string | null; source: HostSourceDto; hasKey: boolean; passwordAuthDisabled?: boolean | null; monitoring: MonitorModeDto; monitorPort?: number | null }
+export type HostDto = { name: string; hostname: string; user: string; port: number; tags: string[]; notes?: string | null; source: HostSourceDto; hasKey: boolean; passwordAuthDisabled?: boolean | null; monitoring: MonitorModeDto; monitorPort?: number | null; fileAccess: FileAccessDto }
 /**
  * Inbound host form payload for `save_host` (tech-gui.md §4.1, Stage 4.1). Always
  * builds a **manual** `Host`: editing an SSH-config import saves a copy that shadows
@@ -445,7 +450,7 @@ export type HostDto = { name: string; hostname: string; user: string; port: numb
  * travel back out: the outbound `HostDto` omits both (§3.4). Inbound only, so it
  * derives `Deserialize` (not `Serialize`).
  */
-export type HostInputDto = { name: string; hostname: string; user: string; port: number; identityFile?: string | null; password?: string | null; proxyJump?: string | null; tags: string[]; notes?: string | null; monitoring?: MonitorModeDto | null; monitorPort?: number | null }
+export type HostInputDto = { name: string; hostname: string; user: string; port: number; identityFile?: string | null; password?: string | null; proxyJump?: string | null; tags: string[]; notes?: string | null; monitoring?: MonitorModeDto | null; monitorPort?: number | null; fileAccess?: FileAccessDto | null }
 /**
  * Host origin, mirrors `omnyssh_core::ssh::client::HostSource`.
  */

@@ -3,8 +3,10 @@
 /// A native russh client powers metrics collection, SFTP, and the
 /// multi-session terminal emulator, plus Smart Server Context with service
 /// discovery and Auto SSH Key Setup for secure authentication.
+pub mod backend;
 pub mod client;
 pub mod discovery;
+pub mod ftp;
 pub mod jump;
 pub mod key_setup;
 pub mod metrics;

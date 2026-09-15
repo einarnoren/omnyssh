@@ -170,6 +170,24 @@
         <p class="text-xs text-faint">Checks the port only — no login, and no metrics on the card.</p>
       {/if}
 
+      <label class={label}>
+        <span>Files tab</span>
+        <Select bind:value={fields.fileAccess} class={field}>
+          <option value="sftp">SFTP (over SSH)</option>
+          <option value="ftp">FTP</option>
+          <option value="ftps">FTPS (explicit TLS)</option>
+          <option value="none">Disabled</option>
+        </Select>
+      </label>
+      {#if fields.fileAccess === 'ftp' || fields.fileAccess === 'ftps'}
+        <p class="text-xs text-faint">
+          For devices with no SFTP subsystem. Always connects on port 21, and reuses the User/Password
+          above — a password is required, since SSH key auth doesn't carry over to FTP.
+        </p>
+      {:else if fields.fileAccess === 'none'}
+        <p class="text-xs text-faint">Hides the Files tab for this host.</p>
+      {/if}
+
       {#if error}
         <p class="text-xs text-status-crit">{error}</p>
       {/if}

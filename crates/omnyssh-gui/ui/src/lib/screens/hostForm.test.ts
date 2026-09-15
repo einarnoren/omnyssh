@@ -16,6 +16,7 @@ function host(partial: Partial<HostDto>): HostDto {
     source: 'manual',
     hasKey: false,
     monitoring: 'ssh',
+    fileAccess: 'sftp',
     ...partial
   };
 }
@@ -127,7 +128,8 @@ describe('formFromHost', () => {
       tags: ['ops'],
       notes: 'x',
       monitoring: 'ssh',
-      monitorPort: undefined
+      monitorPort: undefined,
+      fileAccess: 'sftp'
     });
   });
 });
@@ -192,5 +194,26 @@ describe('formToInput — monitoring mode', () => {
     const fields = formFromHost(host({ monitoring: 'tcpPort', monitorPort: 8443 }));
     expect(fields.monitoring).toBe('tcpPort');
     expect(fields.monitorPort).toBe('8443');
+  });
+});
+
+describe('formToInput — file access', () => {
+  it('defaults to sftp', () => {
+    const result = formToInput({ ...emptyForm(), name: 'web', hostname: '10.0.0.1' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.input.fileAccess).toBe('sftp');
+  });
+
+  it.each(['ftp', 'ftps', 'none'] as const)('carries a non-default choice (%s)', (fileAccess) => {
+    const result = formToInput({ ...emptyForm(), name: 'nas', hostname: '10.0.0.5', fileAccess });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.input.fileAccess).toBe(fileAccess);
+  });
+
+  it('round-trips a non-default host through the edit form', () => {
+    const fields = formFromHost(host({ fileAccess: 'ftp' }));
+    expect(fields.fileAccess).toBe('ftp');
+    const r = formToInput(fields);
+    expect(r.ok && r.input.fileAccess).toBe('ftp');
   });
 });

@@ -50,6 +50,11 @@ flate2 = "1"
 tar = "0.4"
 self-replace = "1"
 
+# FTP/FTPS backend for the file manager — tokio-native, rustls for FTPS
+# (keeps parity with reqwest's rustls-tls above; no OpenSSL dependency).
+suppaftp = { version = "12.0.0", default-features = false, features = ["tokio", "tokio-rustls-ring"] }
+webpki-roots = "1.0.9"
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
 tempfile = "3"

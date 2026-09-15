@@ -9,7 +9,7 @@ use omnyssh_core::config::snippets::{Snippet, SnippetScope};
 use omnyssh_core::event::{
     DetectedService, MetricValue, Metrics, ProcessInfo, ServiceKind, ServiceMetric,
 };
-use omnyssh_core::ssh::client::{ConnectionStatus, Host, HostSource, MonitorMode};
+use omnyssh_core::ssh::client::{ConnectionStatus, FileAccess, Host, HostSource, MonitorMode};
 use omnyssh_core::ssh::key_setup::KeySetupStep;
 use omnyssh_core::ssh::sftp::FileEntry;
 use omnyssh_core::update::UpdateInfo;
@@ -49,6 +49,39 @@ impl From<MonitorModeDto> for MonitorMode {
     }
 }
 
+/// How a host's Files tab connects for file transfer, mirrors
+/// `omnyssh_core::ssh::client::FileAccess`. `None` disables the Files tab.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum FileAccessDto {
+    Sftp,
+    Ftp,
+    Ftps,
+    None,
+}
+
+impl From<FileAccess> for FileAccessDto {
+    fn from(access: FileAccess) -> Self {
+        match access {
+            FileAccess::Sftp => Self::Sftp,
+            FileAccess::Ftp => Self::Ftp,
+            FileAccess::Ftps => Self::Ftps,
+            FileAccess::None => Self::None,
+        }
+    }
+}
+
+impl From<FileAccessDto> for FileAccess {
+    fn from(access: FileAccessDto) -> Self {
+        match access {
+            FileAccessDto::Sftp => Self::Sftp,
+            FileAccessDto::Ftp => Self::Ftp,
+            FileAccessDto::Ftps => Self::Ftps,
+            FileAccessDto::None => Self::None,
+        }
+    }
+}
+
 /// A host as the frontend sees it — password and private-key material omitted
 /// (tech-gui.md §3.4). `hasKey` reports whether an identity file is configured;
 /// the key path itself never crosses the boundary.
@@ -69,6 +102,7 @@ pub struct HostDto {
     pub monitoring: MonitorModeDto,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub monitor_port: Option<u16>,
+    pub file_access: FileAccessDto,
 }
 
 /// Inbound host form payload for `save_host` (tech-gui.md §4.1, Stage 4.1). Always
@@ -99,6 +133,10 @@ pub struct HostInputDto {
     pub monitoring: Option<MonitorModeDto>,
     #[serde(default)]
     pub monitor_port: Option<u16>,
+    // Omitted (`None`) means "unchanged" on an edit, same as `monitoring` above —
+    // `upsert` carries the existing value over when the form didn't set one.
+    #[serde(default)]
+    pub file_access: Option<FileAccessDto>,
 }
 
 /// Live connection state for a host (tech-gui.md §4.1). Internally tagged so the
@@ -295,6 +333,7 @@ impl From<&Host> for HostDto {
             password_auth_disabled: host.password_auth_disabled,
             monitoring: host.monitoring.into(),
             monitor_port: host.monitor_port,
+            file_access: host.file_access.into(),
         }
     }
 }
@@ -329,6 +368,10 @@ impl From<HostInputDto> for Host {
             monitor_port: dto
                 .monitor_port
                 .filter(|&p| p != 0 && monitoring == MonitorMode::TcpPort),
+            // An omitted value means "unchanged" on edit; `upsert` carries the
+            // existing value over, same as it does for `monitoring`. A brand-new
+            // host with no value given keeps the SFTP default.
+            file_access: dto.file_access.map(Into::into).unwrap_or_default(),
             key_setup_date: None,
             password_auth_disabled: None,
         }
@@ -578,6 +621,7 @@ mod tests {
             notes: Some("primary".to_string()),
             monitoring: None,
             monitor_port: None,
+            file_access: None,
         }
     }
 
@@ -631,6 +675,7 @@ mod tests {
             notes: Some(String::new()),
             monitoring: None,
             monitor_port: None,
+            file_access: None,
         });
         assert!(host.identity_file.is_none());
         assert!(host.password.is_none());

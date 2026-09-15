@@ -3,7 +3,7 @@
 // validation mirrors the TUI's `HostForm::to_host` (crates/omnyssh/src/app/host.rs)
 // so both frontends produce the same `hosts.toml` shape and error messages.
 
-import type { HostDto, HostInputDto, MonitorModeDto } from '$lib/bindings';
+import type { FileAccessDto, HostDto, HostInputDto, MonitorModeDto } from '$lib/bindings';
 
 /** The editable form fields — all raw text (tags are comma-separated, port a string). */
 export interface HostFormFields {
@@ -18,6 +18,8 @@ export interface HostFormFields {
   monitoring: MonitorModeDto;
   /** Probe port; blank means "the host's SSH port". Only read for `tcpPort`. */
   monitorPort: string;
+  /** How the Files tab connects for this host — independent of `monitoring`. */
+  fileAccess: FileAccessDto;
 }
 
 export function emptyForm(): HostFormFields {
@@ -33,7 +35,8 @@ export function emptyForm(): HostFormFields {
     tags: '',
     notes: '',
     monitoring: 'ssh',
-    monitorPort: ''
+    monitorPort: '',
+    fileAccess: 'sftp'
   };
 }
 
@@ -51,7 +54,8 @@ export function formFromHost(h: HostDto): HostFormFields {
     tags: h.tags.join(', '),
     notes: h.notes ?? '',
     monitoring: h.monitoring,
-    monitorPort: h.monitorPort == null ? '' : String(h.monitorPort)
+    monitorPort: h.monitorPort == null ? '' : String(h.monitorPort),
+    fileAccess: h.fileAccess
   };
 }
 
@@ -117,7 +121,8 @@ export function formToInput(f: HostFormFields): HostFormResult {
       tags,
       notes: notes || undefined,
       monitoring: f.monitoring,
-      monitorPort
+      monitorPort,
+      fileAccess: f.fileAccess
     }
   };
 }

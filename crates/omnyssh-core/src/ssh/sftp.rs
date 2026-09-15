@@ -1,17 +1,22 @@
-//! SFTP file manager operations.
+//! File manager operations for the Files tab.
 //!
-//! Provides [`SftpManager`] — a persistent background task that owns an SSH+SFTP
-//! session and processes [`SftpCommand`] messages sent from the UI thread.
+//! Provides [`SftpManager`] — a persistent background task that owns a
+//! [`crate::ssh::backend::FileTransferBackend`] (SFTP over SSH, or plain
+//! FTP/FTPS — picked from the host's [`crate::ssh::client::FileAccess`]) and
+//! processes [`SftpCommand`] messages sent from the UI thread.
 //!
 //! All operations are non-blocking from the UI perspective.
 //! Progress is reported via [`CoreEvent::FileTransferProgress`].
 
 use anyhow::Context;
+use async_trait::async_trait;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 use crate::event::{CoreEvent, TransferId};
-use crate::ssh::client::Host;
+use crate::ssh::backend::{guard_local_path, FileTransferBackend};
+use crate::ssh::client::{FileAccess, Host};
+use crate::ssh::ftp::FtpBackend;
 use crate::ssh::session::SshSession;
 
 // ---------------------------------------------------------------------------
@@ -67,7 +72,7 @@ pub enum SftpCommand {
 // SftpManager — handle held by App to communicate with the background task
 // ---------------------------------------------------------------------------
 
-/// Manages a persistent SSH+SFTP background task.
+/// Manages a persistent file-transfer background task.
 ///
 /// Use [`SftpManager::connect`] to create, [`SftpManager::send`] to enqueue
 /// commands, and [`SftpManager::disconnect`] for a clean shutdown.
@@ -77,40 +82,38 @@ pub struct SftpManager {
 }
 
 impl SftpManager {
-    /// Connects to `host` via SSH + SFTP subsystem and spawns the background task.
+    /// Connects to `host`'s Files backend (picked from `host.file_access`)
+    /// and spawns the background task that serves [`SftpCommand`]s.
     ///
     /// On success sends [`CoreEvent::SftpConnected`] through `event_tx`.
     /// On failure the task sends [`CoreEvent::SftpDisconnected`].
     ///
     /// # Errors
-    /// Returns an error if the SSH connection fails before the task is spawned.
+    /// Returns an error if `file_access` is [`FileAccess::None`], or the
+    /// connection fails before the task is spawned.
     pub async fn connect(host: &Host, event_tx: mpsc::Sender<CoreEvent>) -> anyhow::Result<Self> {
-        let session = SshSession::connect(host)
-            .await
-            .context("SFTP SSH connect")?;
-        let stream = session
-            .open_sftp_channel()
-            .await
-            .context("open SFTP channel")?;
-        let sftp = russh_sftp::client::SftpSession::new(stream)
-            .await
-            .context("create SFTP session")?;
+        let backend: Box<dyn FileTransferBackend> = match host.file_access {
+            FileAccess::Sftp => Box::new(SftpBackend::connect(host).await?),
+            FileAccess::Ftp | FileAccess::Ftps => Box::new(FtpBackend::connect(host).await?),
+            FileAccess::None => {
+                anyhow::bail!("'{}' has file access disabled", host.name)
+            }
+        };
 
         let (cmd_tx, cmd_rx) = mpsc::channel::<SftpCommand>(64);
         let host_name = host.name.clone();
 
-        // `session` and `sftp` are owned by this async block.  If the task
-        // panics, Rust's unwind machinery calls their Drop impls before the
-        // panic propagates to tokio — the TCP connection is therefore always
-        // released even in the panic path.  No explicit catch_unwind needed.
+        // If the task panics, Rust's unwind machinery drops `backend` (and
+        // with it the underlying connection) before the panic propagates to
+        // tokio — no explicit catch_unwind needed.
         tokio::spawn(async move {
             let _ = event_tx
                 .send(CoreEvent::SftpConnected {
                     host_name: host_name.clone(),
                 })
                 .await;
-            sftp_task_loop(session, sftp, cmd_rx, event_tx.clone()).await;
-            tracing::info!("SFTP task for '{}' exited", host_name);
+            task_loop(backend, cmd_rx, event_tx.clone()).await;
+            tracing::info!("File transfer task for '{}' exited", host_name);
         });
 
         Ok(Self { cmd_tx })
@@ -128,18 +131,17 @@ impl SftpManager {
 }
 
 // ---------------------------------------------------------------------------
-// Background task loop
+// Background task loop — generic over the active FileTransferBackend
 // ---------------------------------------------------------------------------
 
-async fn sftp_task_loop(
-    _ssh: SshSession, // kept alive to hold the SSH connection open
-    sftp: russh_sftp::client::SftpSession,
+async fn task_loop(
+    mut backend: Box<dyn FileTransferBackend>,
     mut cmd_rx: mpsc::Receiver<SftpCommand>,
     event_tx: mpsc::Sender<CoreEvent>,
 ) {
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
-            SftpCommand::ListDir(path) => match do_list_dir(&sftp, &path).await {
+            SftpCommand::ListDir(path) => match backend.list_dir(&path).await {
                 Ok(entries) => {
                     let _ = event_tx
                         .send(CoreEvent::FileDirListed { path, entries })
@@ -159,7 +161,8 @@ async fn sftp_task_loop(
                 local,
                 transfer_id,
             } => {
-                let result = do_download(&sftp, &remote, &local, transfer_id, &event_tx)
+                let result = backend
+                    .download(&remote, &local, transfer_id, &event_tx)
                     .await
                     .map_err(|e| e.to_string());
                 let _ = event_tx.send(CoreEvent::SftpOpDone { result }).await;
@@ -170,33 +173,30 @@ async fn sftp_task_loop(
                 remote,
                 transfer_id,
             } => {
-                let result = do_upload(&local, &sftp, &remote, transfer_id, &event_tx)
+                let result = backend
+                    .upload(&local, &remote, transfer_id, &event_tx)
                     .await
                     .map_err(|e| e.to_string());
                 let _ = event_tx.send(CoreEvent::SftpOpDone { result }).await;
             }
 
             SftpCommand::Delete(path) => {
-                // Try remove_file first; on failure try remove_dir (empty dirs only).
-                let result = match sftp.remove_file(&path).await {
-                    Ok(()) => Ok(()),
-                    Err(_) => sftp.remove_dir(&path).await.map_err(|e| e.to_string()),
-                };
+                let result = backend.delete(&path).await.map_err(|e| e.to_string());
                 let _ = event_tx.send(CoreEvent::SftpOpDone { result }).await;
             }
 
             SftpCommand::MkDir(path) => {
-                let result = sftp.create_dir(&path).await.map_err(|e| e.to_string());
+                let result = backend.mkdir(&path).await.map_err(|e| e.to_string());
                 let _ = event_tx.send(CoreEvent::SftpOpDone { result }).await;
             }
 
             SftpCommand::Rename { from, to } => {
-                let result = sftp.rename(&from, &to).await.map_err(|e| e.to_string());
+                let result = backend.rename(&from, &to).await.map_err(|e| e.to_string());
                 let _ = event_tx.send(CoreEvent::SftpOpDone { result }).await;
             }
 
             SftpCommand::ReadPreview(path) => {
-                if let Ok(content) = do_read_preview(&sftp, &path).await {
+                if let Ok(content) = backend.read_preview(&path).await {
                     let _ = event_tx
                         .send(CoreEvent::FilePreviewReady { path, content })
                         .await;
@@ -209,188 +209,211 @@ async fn sftp_task_loop(
 }
 
 // ---------------------------------------------------------------------------
-// SFTP helpers
+// SftpBackend — SFTP-over-SSH implementation of FileTransferBackend
 // ---------------------------------------------------------------------------
 
-async fn do_list_dir(
-    sftp: &russh_sftp::client::SftpSession,
-    path: &str,
-) -> anyhow::Result<Vec<FileEntry>> {
-    let read_dir = sftp
-        .read_dir(path)
-        .await
-        .with_context(|| format!("read remote dir '{path}'"))?;
+/// SFTP implementation of [`FileTransferBackend`]. Holds the SSH session
+/// alive for as long as the SFTP channel needs it.
+struct SftpBackend {
+    _ssh: SshSession,
+    sftp: russh_sftp::client::SftpSession,
+}
 
-    let mut entries: Vec<FileEntry> = Vec::new();
+impl SftpBackend {
+    async fn connect(host: &Host) -> anyhow::Result<Self> {
+        let ssh = SshSession::connect(host).await.context("SFTP SSH connect")?;
+        let stream = ssh.open_sftp_channel().await.context("open SFTP channel")?;
+        let sftp = russh_sftp::client::SftpSession::new(stream)
+            .await
+            .context("create SFTP session")?;
+        Ok(Self { _ssh: ssh, sftp })
+    }
+}
 
-    // ".." parent entry (omit at root "/")
-    if let Some(parent) = std::path::Path::new(path).parent() {
-        let parent_str = parent.to_string_lossy();
-        let parent_str = if parent_str.is_empty() {
-            "/"
-        } else {
-            &parent_str
-        };
-        entries.push(FileEntry {
-            name: "..".to_string(),
-            path: parent_str.to_string(),
-            size: 0,
-            is_dir: true,
+#[async_trait]
+impl FileTransferBackend for SftpBackend {
+    async fn list_dir(&mut self, path: &str) -> anyhow::Result<Vec<FileEntry>> {
+        let read_dir = self
+            .sftp
+            .read_dir(path)
+            .await
+            .with_context(|| format!("read remote dir '{path}'"))?;
+
+        let mut entries: Vec<FileEntry> = Vec::new();
+
+        // ".." parent entry (omit at root "/")
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            let parent_str = parent.to_string_lossy();
+            let parent_str = if parent_str.is_empty() { "/" } else { &parent_str };
+            entries.push(FileEntry {
+                name: "..".to_string(),
+                path: parent_str.to_string(),
+                size: 0,
+                is_dir: true,
+            });
+        }
+
+        for entry in read_dir {
+            let name = entry.file_name();
+            let ft = entry.file_type();
+            let meta = entry.metadata();
+
+            let full_path = if path.ends_with('/') {
+                format!("{path}{name}")
+            } else {
+                format!("{path}/{name}")
+            };
+
+            entries.push(FileEntry {
+                name,
+                path: full_path,
+                size: meta.size.unwrap_or(0),
+                is_dir: ft.is_dir(),
+            });
+        }
+
+        // Sort: ".." first, then dirs, then files — all alphabetically.
+        entries.sort_by(|a, b| {
+            if a.name == ".." {
+                return std::cmp::Ordering::Less;
+            }
+            if b.name == ".." {
+                return std::cmp::Ordering::Greater;
+            }
+            match (a.is_dir, b.is_dir) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            }
         });
+
+        Ok(entries)
     }
 
-    for entry in read_dir {
-        let name = entry.file_name();
-        let ft = entry.file_type();
-        let meta = entry.metadata();
+    async fn download(
+        &mut self,
+        remote: &str,
+        local: &str,
+        transfer_id: TransferId,
+        event_tx: &mpsc::Sender<CoreEvent>,
+    ) -> anyhow::Result<()> {
+        guard_local_path(local, remote)?;
 
-        let full_path = if path.ends_with('/') {
-            format!("{path}{name}")
-        } else {
-            format!("{path}/{name}")
-        };
-
-        entries.push(FileEntry {
-            name,
-            path: full_path,
-            size: meta.size.unwrap_or(0),
-            is_dir: ft.is_dir(),
-        });
-    }
-
-    // Sort: ".." first, then dirs, then files — all alphabetically.
-    entries.sort_by(|a, b| {
-        if a.name == ".." {
-            return std::cmp::Ordering::Less;
-        }
-        if b.name == ".." {
-            return std::cmp::Ordering::Greater;
-        }
-        match (a.is_dir, b.is_dir) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-        }
-    });
-
-    Ok(entries)
-}
-
-async fn do_download(
-    sftp: &russh_sftp::client::SftpSession,
-    remote: &str,
-    local: &str,
-    transfer_id: TransferId,
-    event_tx: &mpsc::Sender<CoreEvent>,
-) -> anyhow::Result<()> {
-    // Guard against path traversal in the local destination.
-    if std::path::Path::new(local)
-        .components()
-        .any(|c| c == std::path::Component::ParentDir)
-    {
-        anyhow::bail!("Download destination path contains '..': {local}");
-    }
-    if local.contains('\0') || remote.contains('\0') {
-        anyhow::bail!("Path contains null bytes");
-    }
-
-    // Fetch size for progress (best-effort).
-    let total = sftp
-        .metadata(remote)
-        .await
-        .map(|m| m.size.unwrap_or(0))
-        .unwrap_or(0);
-
-    let mut remote_file = sftp
-        .open(remote)
-        .await
-        .context("open remote file for download")?;
-    let mut local_file = tokio::fs::File::create(local)
-        .await
-        .context("create local file")?;
-
-    let mut buf = vec![0u8; 65_536];
-    let mut done: u64 = 0;
-
-    loop {
-        let n = remote_file
-            .read(&mut buf)
+        // Fetch size for progress (best-effort).
+        let total = self
+            .sftp
+            .metadata(remote)
             .await
-            .context("read remote file")?;
-        if n == 0 {
-            break;
-        }
-        local_file
-            .write_all(&buf[..n])
+            .map(|m| m.size.unwrap_or(0))
+            .unwrap_or(0);
+
+        let mut remote_file = self
+            .sftp
+            .open(remote)
             .await
-            .context("write local file")?;
-        done += n as u64;
-        let _ = event_tx
-            .send(CoreEvent::FileTransferProgress(transfer_id, done, total))
-            .await;
-    }
-
-    Ok(())
-}
-
-async fn do_upload(
-    local: &str,
-    sftp: &russh_sftp::client::SftpSession,
-    remote: &str,
-    transfer_id: TransferId,
-    event_tx: &mpsc::Sender<CoreEvent>,
-) -> anyhow::Result<()> {
-    // Guard against path traversal in the local source.
-    if std::path::Path::new(local)
-        .components()
-        .any(|c| c == std::path::Component::ParentDir)
-    {
-        anyhow::bail!("Upload source path contains '..': {local}");
-    }
-    if local.contains('\0') || remote.contains('\0') {
-        anyhow::bail!("Path contains null bytes");
-    }
-
-    let mut local_file = tokio::fs::File::open(local)
-        .await
-        .context("open local file for upload")?;
-    let total = local_file.metadata().await.map(|m| m.len()).unwrap_or(0);
-
-    let mut remote_file = sftp
-        .create(remote)
-        .await
-        .context("create remote file for upload")?;
-
-    let mut buf = vec![0u8; 65_536];
-    let mut done: u64 = 0;
-
-    loop {
-        let n = local_file.read(&mut buf).await.context("read local file")?;
-        if n == 0 {
-            break;
-        }
-        remote_file
-            .write_all(&buf[..n])
+            .context("open remote file for download")?;
+        let mut local_file = tokio::fs::File::create(local)
             .await
-            .context("write remote file")?;
-        done += n as u64;
-        let _ = event_tx
-            .send(CoreEvent::FileTransferProgress(transfer_id, done, total))
-            .await;
+            .context("create local file")?;
+
+        let mut buf = vec![0u8; 65_536];
+        let mut done: u64 = 0;
+
+        loop {
+            let n = remote_file
+                .read(&mut buf)
+                .await
+                .context("read remote file")?;
+            if n == 0 {
+                break;
+            }
+            local_file
+                .write_all(&buf[..n])
+                .await
+                .context("write local file")?;
+            done += n as u64;
+            let _ = event_tx
+                .send(CoreEvent::FileTransferProgress(transfer_id, done, total))
+                .await;
+        }
+
+        Ok(())
     }
 
-    Ok(())
-}
+    async fn upload(
+        &mut self,
+        local: &str,
+        remote: &str,
+        transfer_id: TransferId,
+        event_tx: &mpsc::Sender<CoreEvent>,
+    ) -> anyhow::Result<()> {
+        guard_local_path(local, remote)?;
 
-async fn do_read_preview(
-    sftp: &russh_sftp::client::SftpSession,
-    path: &str,
-) -> anyhow::Result<String> {
-    let mut file = sftp.open(path).await.context("open for preview")?;
-    let mut buf = vec![0u8; 4_096];
-    let n = file.read(&mut buf).await.context("read preview bytes")?;
-    buf.truncate(n);
-    Ok(String::from_utf8_lossy(&buf).into_owned())
+        let mut local_file = tokio::fs::File::open(local)
+            .await
+            .context("open local file for upload")?;
+        let total = local_file.metadata().await.map(|m| m.len()).unwrap_or(0);
+
+        let mut remote_file = self
+            .sftp
+            .create(remote)
+            .await
+            .context("create remote file for upload")?;
+
+        let mut buf = vec![0u8; 65_536];
+        let mut done: u64 = 0;
+
+        loop {
+            let n = local_file.read(&mut buf).await.context("read local file")?;
+            if n == 0 {
+                break;
+            }
+            remote_file
+                .write_all(&buf[..n])
+                .await
+                .context("write remote file")?;
+            done += n as u64;
+            let _ = event_tx
+                .send(CoreEvent::FileTransferProgress(transfer_id, done, total))
+                .await;
+        }
+
+        Ok(())
+    }
+
+    async fn delete(&mut self, path: &str) -> anyhow::Result<()> {
+        // Try remove_file first; on failure try remove_dir (empty dirs only).
+        match self.sftp.remove_file(path).await {
+            Ok(()) => Ok(()),
+            Err(_) => self
+                .sftp
+                .remove_dir(path)
+                .await
+                .map_err(|e| anyhow::anyhow!("delete '{path}': {e}")),
+        }
+    }
+
+    async fn mkdir(&mut self, path: &str) -> anyhow::Result<()> {
+        self.sftp
+            .create_dir(path)
+            .await
+            .with_context(|| format!("mkdir '{path}'"))
+    }
+
+    async fn rename(&mut self, from: &str, to: &str) -> anyhow::Result<()> {
+        self.sftp
+            .rename(from, to)
+            .await
+            .with_context(|| format!("rename '{from}' -> '{to}'"))
+    }
+
+    async fn read_preview(&mut self, path: &str) -> anyhow::Result<String> {
+        let mut file = self.sftp.open(path).await.context("open for preview")?;
+        let mut buf = vec![0u8; 4_096];
+        let n = file.read(&mut buf).await.context("read preview bytes")?;
+        buf.truncate(n);
+        Ok(String::from_utf8_lossy(&buf).into_owned())
+    }
 }
 
 // ---------------------------------------------------------------------------

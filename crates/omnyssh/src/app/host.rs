@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use super::*;
-use omnyssh_core::ssh::client::{HostSource, MonitorMode};
+use omnyssh_core::ssh::client::{FileAccess, HostSource, MonitorMode};
 
 // ---------------------------------------------------------------------------
 // Host form (used in Add / Edit popups)
@@ -21,6 +21,7 @@ pub const FORM_FIELD_LABELS: &[&str] = &[
     "Tags (comma-sep)",
     "Notes",
     "Monitoring (ssh | tcp | tcp:PORT)",
+    "File Access (sftp | ftp | ftps | none)",
 ];
 
 /// Whether an edit changed anything a running poller reads. Everything else on
@@ -64,6 +65,31 @@ fn parse_monitoring(value: &str) -> Result<(MonitorMode, Option<u16>), String> {
             .filter(|&p| p != 0)
             .map(|p| (MonitorMode::TcpPort, Some(p)))
             .ok_or_else(|| format!("Monitoring must be 'ssh', 'tcp' or 'tcp:PORT', got '{other}'")),
+    }
+}
+
+/// Renders a host's file-access protocol back into its form field.
+fn file_access_value(host: &Host) -> &'static str {
+    match host.file_access {
+        FileAccess::Sftp => "",
+        FileAccess::Ftp => "ftp",
+        FileAccess::Ftps => "ftps",
+        FileAccess::None => "none",
+    }
+}
+
+/// Parses the file-access field: empty or `sftp` keeps the default (SFTP over
+/// the SSH connection), `ftp`/`ftps` pick the FTP backend, `none` disables
+/// the Files tab for this host.
+fn parse_file_access(value: &str) -> Result<FileAccess, String> {
+    match value {
+        "" | "sftp" => Ok(FileAccess::Sftp),
+        "ftp" => Ok(FileAccess::Ftp),
+        "ftps" => Ok(FileAccess::Ftps),
+        "none" => Ok(FileAccess::None),
+        other => Err(format!(
+            "File Access must be 'sftp', 'ftp', 'ftps' or 'none', got '{other}'"
+        )),
     }
 }
 
@@ -137,6 +163,7 @@ impl HostForm {
         form.fields[6] = FormField::with_value(host.tags.join(", "));
         form.fields[7] = FormField::with_value(host.notes.as_deref().unwrap_or(""));
         form.fields[8] = FormField::with_value(monitoring_value(host));
+        form.fields[9] = FormField::with_value(file_access_value(host));
         form
     }
 
@@ -210,6 +237,7 @@ impl HostForm {
         };
 
         let (monitoring, monitor_port) = parse_monitoring(self.fields[8].value.trim())?;
+        let file_access = parse_file_access(self.fields[9].value.trim())?;
 
         Ok(Host {
             name,
@@ -225,6 +253,7 @@ impl HostForm {
             original_ssh_host: None,
             monitoring,
             monitor_port,
+            file_access,
             key_setup_date: None,
             password_auth_disabled: None,
         })
@@ -740,6 +769,39 @@ mod tests {
         for text in ["tcp:0", "tcp:99999", "http", "tcp:"] {
             assert!(
                 parse_monitoring(text).is_err(),
+                "'{text}' should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn the_file_access_field_round_trips_through_the_form() {
+        for (text, access) in [
+            ("", FileAccess::Sftp),
+            ("sftp", FileAccess::Sftp),
+            ("ftp", FileAccess::Ftp),
+            ("ftps", FileAccess::Ftps),
+            ("none", FileAccess::None),
+        ] {
+            assert_eq!(parse_file_access(text), Ok(access), "parsing '{text}'");
+
+            let host = Host {
+                file_access: access,
+                ..Host::default()
+            };
+            assert_eq!(
+                parse_file_access(file_access_value(&host)),
+                Ok(access),
+                "round-tripping {access:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unusable_file_access_value_is_rejected() {
+        for text in ["sft", "FTP", "http", "tcp"] {
+            assert!(
+                parse_file_access(text).is_err(),
                 "'{text}' should be rejected"
             );
         }
