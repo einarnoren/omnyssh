@@ -7,6 +7,11 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## Unreleased
+
+### Features
+- **FTP and FTPS file access, alongside SFTP.** Some devices — routers, NAS boxes, embedded Linux — answer SSH for a shell but have no SFTP subsystem, only plain FTP. The Files tab previously assumed every host spoke SFTP, so those devices got a broken button. A host's file access is now its own setting, independent of its SSH shell (`sftp` by default, or `ftp` / `ftps` / `none` to disable the tab entirely), in both the terminal app's host form and the desktop app's host editor. FTP always dials port 21 and reuses the host's SSH user/password — a password is required, since SSH key auth has no FTP equivalent. If a host is left on SFTP but the server actually rejects the subsystem request, the Files tab now recognizes that specific failure and offers a one-click "switch to FTP and retry" instead of a dead-end error.
+
 ## 1.1.2 — 2026-08-22
 
 ### Features

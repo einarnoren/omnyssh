@@ -54,8 +54,10 @@ Cards for every host with CPU, RAM and disk bars, uptime, OS version, top proces
 ### Real terminals
 Full PTY sessions in tabs. Open as many servers as you need, switch between them from the sidebar, and keep them running while you work in the dashboard.
 
-### Two panel SFTP
+### Two panel SFTP — and FTP/FTPS for the hosts that need it
 Local on the left, remote on the right. Tick the files you want and move them across, watch the progress bar, select many at once. Nobody remembers `scp -r` syntax anyway.
+
+Some devices — routers, NAS boxes, embedded Linux — answer SSH for a shell but have no SFTP subsystem at all, only plain FTP. Set a host's file access to FTP or FTPS (explicit `AUTH TLS`) in the host editor, independent of its SSH shell settings, and the same file browser talks that protocol instead. If a host is set to SFTP but the server rejects it, the Files tab offers a one-click switch to FTP on the spot.
 
 ### Snippets
 Save the commands you paste every week. Pick a snippet, tick the hosts to send it to, and it runs on all of them at once. Snippets take parameters, so `sudo systemctl restart {{service}}` asks you for the name.
