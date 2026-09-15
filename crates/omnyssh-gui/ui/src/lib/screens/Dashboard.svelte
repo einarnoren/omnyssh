@@ -238,10 +238,14 @@
             </div>
             <div class="flex flex-wrap items-center gap-1.5">
               {#each QUICK_ACTIONS as action (action.id)}
+                {@const filesDisabled = action.id === 'files' && card.host.fileAccess === 'none'}
                 <button
                   type="button"
-                  class={pill}
-                  title="{action.label} on {card.host.name}"
+                  class="{pill} {filesDisabled ? 'cursor-not-allowed opacity-50 hover:border-default hover:bg-transparent hover:text-muted' : ''}"
+                  title={filesDisabled
+                    ? `File access is disabled for ${card.host.name}`
+                    : `${action.label} on ${card.host.name}`}
+                  disabled={filesDisabled}
                   onclick={() => spawnSession(action.kind, card.host.name)}
                 >
                   <Icon name={action.kind} size={13} />

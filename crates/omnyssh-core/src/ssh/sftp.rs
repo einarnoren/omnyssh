@@ -222,7 +222,11 @@ struct SftpBackend {
 impl SftpBackend {
     async fn connect(host: &Host) -> anyhow::Result<Self> {
         let ssh = SshSession::connect(host).await.context("SFTP SSH connect")?;
-        let stream = ssh.open_sftp_channel().await.context("open SFTP channel")?;
+        // No `.context(...)` here: `open_sftp_channel` already contextualizes its own
+        // failures, and a plain SFTP-subsystem rejection must keep its own message —
+        // as the *only* wrapping layer, it's what the Files tab pattern-matches on to
+        // offer "switch to FTP?" (see `SftpSubsystemRejected`).
+        let stream = ssh.open_sftp_channel().await?;
         let sftp = russh_sftp::client::SftpSession::new(stream)
             .await
             .context("create SFTP session")?;

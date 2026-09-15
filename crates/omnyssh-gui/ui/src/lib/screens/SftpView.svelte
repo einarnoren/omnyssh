@@ -14,6 +14,8 @@
   import { sessions, type Session } from '$lib/stores/sessions';
   import { sftp, markedEntries, formatBytes, type PaneSide } from '$lib/stores/sftp';
   import { lastError } from '$lib/stores/notifications';
+  import { hosts } from '$lib/stores/hosts';
+  import { formFromHost, formToInput } from './hostForm';
   import {
     sftpOpen,
     sftpList,
@@ -25,15 +27,23 @@
     sftpDelete,
     sftpPreview,
     listLocalDir,
-    previewLocalFile
+    previewLocalFile,
+    saveHost,
+    reloadHosts
   } from '$lib/ipc/commands';
 
   let { session, active }: { session: Session; active: boolean } = $props();
 
   let backendId = $state<number | undefined>(undefined);
   let openError = $state<string | undefined>(undefined);
+  let switchingToFtp = $state(false);
   let destroyed = false;
   let mirrored: string | undefined;
+
+  // The core's own wording for `SftpSubsystemRejected` (crates/omnyssh-core/src/ssh/session.rs) —
+  // matched here, rather than re-deriving the diagnosis client-side, because the core is the
+  // one place that actually waits for the server's channel-request reply.
+  const sftpUnsupported = $derived(openError?.includes('rejected the SFTP subsystem') ?? false);
 
   // Queued mutations, dispatched one at a time (see the pump effect). The core's SFTP
   // command channel is bounded and drops on overflow, so a large batch fired at once
@@ -86,32 +96,62 @@
     void sftpList(id, path).catch((err) => sftp.paneError(id, 'remote', errMsg(err)));
   }
 
+  async function connect(): Promise<void> {
+    openError = undefined;
+    let home = '/';
+    try {
+      home = await homeDir();
+    } catch {
+      home = '/';
+    }
+    let id: number;
+    try {
+      id = await sftpOpen(session.hostName);
+    } catch (err) {
+      sessions.setStatus(session.id, 'failed');
+      openError = errMsg(err);
+      lastError.set(errMsg(err));
+      return;
+    }
+    if (destroyed) {
+      void sftpClose(id).catch(() => {});
+      return;
+    }
+    backendId = id;
+    sftp.open(id, session.hostName);
+    void refreshLocal(home);
+    refreshRemote('/');
+  }
+
+  // Offered only when `sftpUnsupported` is showing — one click fixes the host's
+  // `fileAccess` (mirroring how the edit form itself would save it) and retries
+  // the same session immediately, instead of the user re-opening the host editor.
+  async function switchToFtpAndRetry(): Promise<void> {
+    const host = $hosts.find((h) => h.name === session.hostName);
+    if (!host) {
+      lastError.set(`'${session.hostName}' no longer exists`);
+      return;
+    }
+    switchingToFtp = true;
+    try {
+      const fields = { ...formFromHost(host), fileAccess: 'ftp' as const };
+      const result = formToInput(fields);
+      if (!result.ok) {
+        lastError.set(result.error);
+        return;
+      }
+      await saveHost(result.input);
+      await reloadHosts();
+      await connect();
+    } catch (err) {
+      lastError.set(errMsg(err));
+    } finally {
+      switchingToFtp = false;
+    }
+  }
+
   onMount(() => {
-    void (async () => {
-      let home = '/';
-      try {
-        home = await homeDir();
-      } catch {
-        home = '/';
-      }
-      let id: number;
-      try {
-        id = await sftpOpen(session.hostName);
-      } catch (err) {
-        sessions.setStatus(session.id, 'failed');
-        openError = errMsg(err);
-        lastError.set(errMsg(err));
-        return;
-      }
-      if (destroyed) {
-        void sftpClose(id).catch(() => {});
-        return;
-      }
-      backendId = id;
-      sftp.open(id, session.hostName);
-      void refreshLocal(home);
-      refreshRemote('/');
-    })();
+    void connect();
   });
 
   onDestroy(() => {
@@ -284,6 +324,16 @@
     <div class="flex flex-1 flex-col items-center justify-center gap-2 p-10 text-center">
       <p class="font-medium">Could not open Files on {session.hostName}</p>
       <p class="max-w-md text-sm text-muted">{openError}</p>
+      {#if sftpUnsupported}
+        <button
+          type="button"
+          class="{toolBtn} mt-2"
+          disabled={switchingToFtp}
+          onclick={() => void switchToFtpAndRetry()}
+        >
+          {switchingToFtp ? 'Switching…' : 'This host has no SFTP — switch to FTP and retry'}
+        </button>
+      {/if}
     </div>
   {:else if !view}
     <div class="flex flex-1 items-center justify-center p-10 text-center">

@@ -133,6 +133,15 @@ impl std::ops::Deref for SshConnection {
 // SshSession
 // ---------------------------------------------------------------------------
 
+/// The server explicitly refused the SFTP subsystem request (`SSH_MSG_CHANNEL_FAILURE`).
+///
+/// Distinguished from a generic connect/protocol failure so callers — e.g. the
+/// Files tab — can offer a specific fix ("this host has no SFTP; try FTP?")
+/// instead of a raw error message.
+#[derive(Debug, thiserror::Error)]
+#[error("the server rejected the SFTP subsystem request")]
+pub struct SftpSubsystemRejected;
+
 /// An authenticated SSH session ready for command execution.
 ///
 /// Holds the russh client handle for the duration of its lifetime.
@@ -219,13 +228,21 @@ impl SshSession {
     /// The `SshSession` **must** remain alive for the entire lifetime of the
     /// SFTP session — dropping it closes the underlying TCP connection.
     ///
+    /// `request_subsystem` only *sends* the request — russh does not itself wait
+    /// for the server's `SSH_MSG_CHANNEL_SUCCESS`/`FAILURE` reply — so without
+    /// this, a server with no SFTP subsystem would hand back a channel that
+    /// never speaks SFTP, and the caller would only find out from an opaque
+    /// protocol-decode error out of `russh_sftp`. Waiting for the reply here
+    /// turns that into a distinct, actionable [`SftpSubsystemRejected`].
+    ///
     /// # Errors
-    /// Returns an error if the channel cannot be opened or if the server rejects
-    /// the SFTP subsystem request.
+    /// Returns [`SftpSubsystemRejected`] if the server explicitly refuses the
+    /// subsystem request, or a generic error if the channel cannot be opened,
+    /// the request cannot be sent, or the server never replies within 10s.
     pub async fn open_sftp_channel(
         &self,
     ) -> anyhow::Result<russh::ChannelStream<russh::client::Msg>> {
-        let channel = self
+        let mut channel = self
             .handle
             .channel_open_session()
             .await
@@ -234,6 +251,24 @@ impl SshSession {
             .request_subsystem(true, "sftp")
             .await
             .context("request SFTP subsystem")?;
+
+        time::timeout(Duration::from_secs(10), async {
+            loop {
+                match channel.wait().await {
+                    Some(ChannelMsg::Success) => return Ok(()),
+                    Some(ChannelMsg::Failure) => return Err(SftpSubsystemRejected.into()),
+                    // Other channel traffic (e.g. a window adjustment) can arrive
+                    // first; keep waiting for the request's own reply.
+                    Some(_) => continue,
+                    None => {
+                        return Err(anyhow!("channel closed before the SFTP subsystem reply"))
+                    }
+                }
+            }
+        })
+        .await
+        .map_err(|_| anyhow!("server never replied to the SFTP subsystem request (10s)"))??;
+
         Ok(channel.into_stream())
     }
 
