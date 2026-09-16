@@ -181,9 +181,30 @@
       </label>
       {#if fields.fileAccess === 'ftp' || fields.fileAccess === 'ftps'}
         <p class="text-xs text-faint">
-          For devices with no SFTP subsystem. Always connects on port 21, and reuses the User/Password
-          above — a password is required, since SSH key auth doesn't carry over to FTP.
+          For devices with no SFTP subsystem. Defaults to port 21 and the User/Password above — a
+          password is required somewhere, since SSH key auth doesn't carry over to FTP. Override any of
+          the three below only if this host's FTP login actually differs from its SSH one.
         </p>
+        <div class="grid grid-cols-[1fr,7rem] gap-3">
+          <label class={label}>
+            <span>FTP user</span>
+            <input bind:value={fields.ftpUser} class={field} placeholder={fields.user || 'root'} />
+          </label>
+          <label class={label}>
+            <span>FTP port</span>
+            <input bind:value={fields.ftpPort} inputmode="numeric" class={field} placeholder="21" />
+          </label>
+        </div>
+        <label class={label}>
+          <span>FTP password</span>
+          <input
+            type="password"
+            bind:value={fields.ftpPassword}
+            class={field}
+            placeholder={mode === 'edit' ? 'Leave blank to keep the current value' : fields.password || 'Same as SSH password'}
+            autocomplete="off"
+          />
+        </label>
       {:else if fields.fileAccess === 'none'}
         <p class="text-xs text-faint">Hides the Files tab for this host.</p>
       {/if}

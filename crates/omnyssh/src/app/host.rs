@@ -22,6 +22,9 @@ pub const FORM_FIELD_LABELS: &[&str] = &[
     "Notes",
     "Monitoring (ssh | tcp | tcp:PORT)",
     "File Access (sftp | ftp | ftps | none)",
+    "FTP User (blank = same as SSH User)",
+    "FTP Password (blank = same as SSH Password)",
+    "FTP Port (blank = 21)",
 ];
 
 /// Whether an edit changed anything a running poller reads. Everything else on
@@ -164,6 +167,11 @@ impl HostForm {
         form.fields[7] = FormField::with_value(host.notes.as_deref().unwrap_or(""));
         form.fields[8] = FormField::with_value(monitoring_value(host));
         form.fields[9] = FormField::with_value(file_access_value(host));
+        form.fields[10] = FormField::with_value(host.ftp_user.as_deref().unwrap_or(""));
+        form.fields[11] = FormField::with_value(host.ftp_password.as_deref().unwrap_or(""));
+        form.fields[12] = FormField::with_value(
+            host.ftp_port.map(|p| p.to_string()).unwrap_or_default(),
+        );
         form
     }
 
@@ -239,6 +247,35 @@ impl HostForm {
         let (monitoring, monitor_port) = parse_monitoring(self.fields[8].value.trim())?;
         let file_access = parse_file_access(self.fields[9].value.trim())?;
 
+        let ftp_user = {
+            let v = self.fields[10].value.trim();
+            if v.is_empty() {
+                None
+            } else {
+                Some(v.to_string())
+            }
+        };
+
+        let ftp_password = {
+            let v = self.fields[11].value.trim();
+            if v.is_empty() {
+                None
+            } else {
+                Some(v.to_string())
+            }
+        };
+
+        let ftp_port = {
+            let v = self.fields[12].value.trim();
+            if v.is_empty() {
+                None
+            } else {
+                Some(v.parse::<u16>().ok().filter(|&p| p != 0).ok_or_else(|| {
+                    format!("FTP Port must be a number between 1 and 65535, got '{v}'")
+                })?)
+            }
+        };
+
         Ok(Host {
             name,
             hostname,
@@ -254,6 +291,9 @@ impl HostForm {
             monitoring,
             monitor_port,
             file_access,
+            ftp_user,
+            ftp_password,
+            ftp_port,
             key_setup_date: None,
             password_auth_disabled: None,
         })
@@ -804,6 +844,49 @@ mod tests {
                 parse_file_access(text).is_err(),
                 "'{text}' should be rejected"
             );
+        }
+    }
+
+    #[test]
+    fn ftp_override_fields_round_trip_through_the_form() {
+        let host = Host {
+            name: String::from("nas"),
+            hostname: String::from("10.0.0.5"),
+            file_access: FileAccess::Ftp,
+            ftp_user: Some(String::from("ftpuser")),
+            ftp_password: Some(String::from("ftppass")),
+            ftp_port: Some(2121),
+            ..Host::default()
+        };
+
+        let reopened = HostForm::from_host(&host)
+            .to_host(HostSource::Manual)
+            .expect("the form round-trips a valid host");
+
+        assert_eq!(reopened.ftp_user.as_deref(), Some("ftpuser"));
+        assert_eq!(reopened.ftp_password.as_deref(), Some("ftppass"));
+        assert_eq!(reopened.ftp_port, Some(2121));
+    }
+
+    #[test]
+    fn blank_ftp_override_fields_stay_none() {
+        let host = host_form(["n", "h", "u", "22", "", "", "", ""])
+            .to_host(HostSource::Manual)
+            .unwrap();
+        assert!(host.ftp_user.is_none());
+        assert!(host.ftp_password.is_none());
+        assert!(host.ftp_port.is_none());
+    }
+
+    #[test]
+    fn an_unusable_ftp_port_is_rejected() {
+        for text in ["0", "99999", "abc"] {
+            let mut form = HostForm::empty();
+            form.fields[0] = FormField::with_value("n");
+            form.fields[1] = FormField::with_value("h");
+            form.fields[12] = FormField::with_value(text);
+            let err = form.to_host(HostSource::Manual).unwrap_err();
+            assert!(err.contains("FTP Port"), "'{text}': {err}");
         }
     }
 

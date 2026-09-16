@@ -112,6 +112,9 @@ fn upsert(hosts: &mut Vec<Host>, input: HostInputDto, imported: Option<Host>) {
                 host.file_access = existing.file_access;
             }
             host.password = host.password.or_else(|| existing.password.clone());
+            host.ftp_password = host
+                .ftp_password
+                .or_else(|| existing.ftp_password.clone());
             host.identity_file = host
                 .identity_file
                 .or_else(|| existing.identity_file.clone());
@@ -185,6 +188,9 @@ mod tests {
             monitoring: None,
             monitor_port: None,
             file_access: None,
+            ftp_user: None,
+            ftp_password: None,
+            ftp_port: None,
         }
     }
 
@@ -377,6 +383,32 @@ mod tests {
         edit.password = Some("rotated".to_string());
         upsert(&mut hosts, edit, None);
         assert_eq!(hosts[0].password.as_deref(), Some("rotated"));
+    }
+
+    #[test]
+    fn upsert_keeps_the_ftp_password_the_form_left_blank() {
+        let mut hosts = vec![Host {
+            name: "nas".to_string(),
+            ftp_password: Some("ftp-secret".to_string()),
+            source: HostSource::Manual,
+            ..Host::default()
+        }];
+        upsert(&mut hosts, input("nas"), None);
+        assert_eq!(hosts[0].ftp_password.as_deref(), Some("ftp-secret"));
+    }
+
+    #[test]
+    fn upsert_overwrites_the_ftp_password_when_a_new_one_is_provided() {
+        let mut hosts = vec![Host {
+            name: "nas".to_string(),
+            ftp_password: Some("old".to_string()),
+            source: HostSource::Manual,
+            ..Host::default()
+        }];
+        let mut edit = input("nas");
+        edit.ftp_password = Some("rotated".to_string());
+        upsert(&mut hosts, edit, None);
+        assert_eq!(hosts[0].ftp_password.as_deref(), Some("rotated"));
     }
 
     #[test]

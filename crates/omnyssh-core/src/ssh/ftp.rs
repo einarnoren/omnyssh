@@ -5,10 +5,11 @@
 //! and only exposes plain FTP for file access. Implicit FTPS (port 990) is
 //! deprecated and intentionally not supported; only explicit `AUTH TLS` is.
 //!
-//! FTP has no equivalent of SSH's port-22-for-everything: it always dials the
-//! well-known FTP port (21), independent of the host's SSH `port` field, and
-//! reuses the SSH `user`/`password` for login since there is currently no
-//! separate FTP credential field on `Host`.
+//! FTP has no equivalent of SSH's port-22-for-everything: by default it dials
+//! the well-known FTP port (21), independent of the host's SSH `port` field,
+//! and reuses the SSH `user`/`password` for login. `Host::ftp_user`,
+//! `ftp_password` and `ftp_port` override any of those individually, for a
+//! device whose FTP login or port genuinely differs from its SSH one.
 
 use std::sync::Arc;
 
@@ -50,10 +51,12 @@ impl FtpBackend {
     ///
     /// # Errors
     /// Returns an error if `file_access` isn't an FTP variant, the TCP
-    /// connect / TLS handshake fails, or `host.password` is unset (FTP has
-    /// no equivalent of SSH key auth, so a password is required).
+    /// connect / TLS handshake fails, or both `host.ftp_password` and
+    /// `host.password` are unset (FTP has no equivalent of SSH key auth, so
+    /// a password is required from one of the two).
     pub async fn connect(host: &Host) -> anyhow::Result<Self> {
-        let addr = format!("{}:{FTP_PORT}", host.hostname);
+        let port = host.ftp_port.unwrap_or(FTP_PORT);
+        let addr = format!("{}:{port}", host.hostname);
         let mut conn = match host.file_access {
             FileAccess::Ftp => FtpConn::Plain(
                 AsyncFtpStream::connect(&addr)
@@ -76,16 +79,21 @@ impl FtpBackend {
             }
         };
 
-        let password = host.password.as_deref().ok_or_else(|| {
-            anyhow::anyhow!(
-                "host '{}' has no password set — FTP login needs one \
-                 (SSH key auth doesn't carry over to FTP)",
-                host.name
-            )
-        })?;
+        let user = host.ftp_user.as_deref().unwrap_or(&host.user);
+        let password = host
+            .ftp_password
+            .as_deref()
+            .or(host.password.as_deref())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "host '{}' has no password set — FTP login needs one \
+                     (SSH key auth doesn't carry over to FTP)",
+                    host.name
+                )
+            })?;
         match &mut conn {
-            FtpConn::Plain(c) => c.login(host.user.as_str(), password).await,
-            FtpConn::Tls(c) => c.login(host.user.as_str(), password).await,
+            FtpConn::Plain(c) => c.login(user, password).await,
+            FtpConn::Tls(c) => c.login(user, password).await,
         }
         .context("FTP login")?;
 

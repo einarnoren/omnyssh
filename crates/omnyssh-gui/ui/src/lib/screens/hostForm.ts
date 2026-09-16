@@ -20,6 +20,12 @@ export interface HostFormFields {
   monitorPort: string;
   /** How the Files tab connects for this host — independent of `monitoring`. */
   fileAccess: FileAccessDto;
+  /** FTP login override; blank means "same as User" — only read for `ftp`/`ftps`. */
+  ftpUser: string;
+  /** FTP password override; blank on edit means "keep the stored value", same as `password`. */
+  ftpPassword: string;
+  /** FTP port override; blank means the standard FTP port (21). */
+  ftpPort: string;
 }
 
 export function emptyForm(): HostFormFields {
@@ -36,7 +42,10 @@ export function emptyForm(): HostFormFields {
     notes: '',
     monitoring: 'ssh',
     monitorPort: '',
-    fileAccess: 'sftp'
+    fileAccess: 'sftp',
+    ftpUser: '',
+    ftpPassword: '',
+    ftpPort: ''
   };
 }
 
@@ -55,7 +64,10 @@ export function formFromHost(h: HostDto): HostFormFields {
     notes: h.notes ?? '',
     monitoring: h.monitoring,
     monitorPort: h.monitorPort == null ? '' : String(h.monitorPort),
-    fileAccess: h.fileAccess
+    fileAccess: h.fileAccess,
+    ftpUser: h.ftpUser ?? '',
+    ftpPassword: '',
+    ftpPort: h.ftpPort == null ? '' : String(h.ftpPort)
   };
 }
 
@@ -105,9 +117,24 @@ export function formToInput(f: HostFormFields): HostFormResult {
     monitorPort = Number(monitorPortRaw);
   }
 
+  // Only meaningful for ftp/ftps; blank means "use the standard FTP port (21)".
+  let ftpPort: number | undefined;
+  const ftpPortRaw = f.ftpPort.trim();
+  if (ftpPortRaw !== '') {
+    if (!/^\+?\d+$/.test(ftpPortRaw) || Number(ftpPortRaw) < 1 || Number(ftpPortRaw) > 65535) {
+      return {
+        ok: false,
+        error: `FTP Port must be a number between 1 and 65535, got '${ftpPortRaw}'`
+      };
+    }
+    ftpPort = Number(ftpPortRaw);
+  }
+
   const identityFile = f.identityFile.trim();
   const password = f.password.trim();
   const notes = f.notes.trim();
+  const ftpUser = f.ftpUser.trim();
+  const ftpPassword = f.ftpPassword.trim();
   const tags = splitCsv(f.tags);
   return {
     ok: true,
@@ -122,7 +149,10 @@ export function formToInput(f: HostFormFields): HostFormResult {
       notes: notes || undefined,
       monitoring: f.monitoring,
       monitorPort,
-      fileAccess: f.fileAccess
+      fileAccess: f.fileAccess,
+      ftpUser: ftpUser || undefined,
+      ftpPassword: ftpPassword || undefined,
+      ftpPort
     }
   };
 }

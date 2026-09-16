@@ -112,6 +112,20 @@ pub struct Host {
     /// How the Files tab connects for this host.
     #[serde(default, skip_serializing_if = "FileAccess::is_sftp")]
     pub file_access: FileAccess,
+    /// FTP login override — only consulted when `file_access` is `Ftp`/`Ftps`.
+    /// Falls back to `user` when unset (a device with a separate FTP account
+    /// needs this; most don't).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ftp_user: Option<String>,
+    /// FTP password override. Falls back to `password` when unset; FTP still
+    /// requires *some* password even then, since SSH key auth has no FTP
+    /// equivalent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ftp_password: Option<String>,
+    /// FTP port override. Falls back to the standard FTP port (21) when
+    /// unset — never to `port`, which is the SSH port.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ftp_port: Option<u16>,
 
     // -----------------------------------------------------------------------
     // Auto SSH Key Setup metadata
@@ -151,6 +165,9 @@ impl Default for Host {
             monitoring: MonitorMode::default(),
             monitor_port: None,
             file_access: FileAccess::default(),
+            ftp_user: None,
+            ftp_password: None,
+            ftp_port: None,
             key_setup_date: None,
             password_auth_disabled: None,
         }
@@ -215,6 +232,34 @@ mod tests {
         let written = toml::to_string(&host).expect("serialize");
         let read: Host = toml::from_str(&written).expect("deserialize");
         assert_eq!(read.file_access, FileAccess::Ftp);
+    }
+
+    /// The FTP override fields stay out of `hosts.toml` when unset, and persist
+    /// when a host actually needs a separate FTP login.
+    #[test]
+    fn ftp_overrides_round_trip_and_stay_out_when_unset() {
+        let host: Host = toml::from_str("name = \"web\"\nhostname = \"10.0.0.1\"\n")
+            .expect("a host without FTP overrides still parses");
+        assert_eq!(host.ftp_user, None);
+        assert_eq!(host.ftp_password, None);
+        assert_eq!(host.ftp_port, None);
+        let written = toml::to_string(&host).expect("serialize");
+        assert!(!written.contains("ftp_"), "{written}");
+
+        let overridden = Host {
+            name: String::from("nas"),
+            hostname: String::from("10.0.0.5"),
+            file_access: FileAccess::Ftp,
+            ftp_user: Some(String::from("ftpuser")),
+            ftp_password: Some(String::from("ftppass")),
+            ftp_port: Some(2121),
+            ..Host::default()
+        };
+        let written = toml::to_string(&overridden).expect("serialize");
+        let read: Host = toml::from_str(&written).expect("deserialize");
+        assert_eq!(read.ftp_user.as_deref(), Some("ftpuser"));
+        assert_eq!(read.ftp_password.as_deref(), Some("ftppass"));
+        assert_eq!(read.ftp_port, Some(2121));
     }
 
     /// The wire and the TUI form spell the mode differently, so a hand-edited

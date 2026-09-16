@@ -217,3 +217,51 @@ describe('formToInput — file access', () => {
     expect(r.ok && r.input.fileAccess).toBe('ftp');
   });
 });
+
+describe('formToInput — FTP overrides', () => {
+  it('leaves overrides undefined when blank', () => {
+    const result = formToInput({ ...emptyForm(), name: 'nas', hostname: '10.0.0.5', fileAccess: 'ftp' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.input.ftpUser).toBeUndefined();
+      expect(result.input.ftpPassword).toBeUndefined();
+      expect(result.input.ftpPort).toBeUndefined();
+    }
+  });
+
+  it('carries a provided override', () => {
+    const result = formToInput({
+      ...emptyForm(),
+      name: 'nas',
+      hostname: '10.0.0.5',
+      fileAccess: 'ftp',
+      ftpUser: 'ftpuser',
+      ftpPassword: 'ftppass',
+      ftpPort: '2121'
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.input.ftpUser).toBe('ftpuser');
+      expect(result.input.ftpPassword).toBe('ftppass');
+      expect(result.input.ftpPort).toBe(2121);
+    }
+  });
+
+  it('rejects an out-of-range FTP port', () => {
+    const result = formToInput({
+      ...emptyForm(),
+      name: 'nas',
+      hostname: '10.0.0.5',
+      fileAccess: 'ftp',
+      ftpPort: '99999'
+    });
+    expect(result).toEqual({ ok: false, error: "FTP Port must be a number between 1 and 65535, got '99999'" });
+  });
+
+  it('seeds ftpUser/ftpPort from the host but leaves ftpPassword blank (secret)', () => {
+    const fields = formFromHost(host({ fileAccess: 'ftp', ftpUser: 'ftpuser', ftpPort: 2121 }));
+    expect(fields.ftpUser).toBe('ftpuser');
+    expect(fields.ftpPort).toBe('2121');
+    expect(fields.ftpPassword).toBe('');
+  });
+});

@@ -103,6 +103,13 @@ pub struct HostDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub monitor_port: Option<u16>,
     pub file_access: FileAccessDto,
+    /// FTP login override, only meaningful when `fileAccess` is `ftp`/`ftps`.
+    /// Not secret (unlike the FTP password, which never crosses the boundary),
+    /// so it round-trips through the editor like `notes` does.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ftp_user: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ftp_port: Option<u16>,
 }
 
 /// Inbound host form payload for `save_host` (tech-gui.md §4.1, Stage 4.1). Always
@@ -137,6 +144,16 @@ pub struct HostInputDto {
     // `upsert` carries the existing value over when the form didn't set one.
     #[serde(default)]
     pub file_access: Option<FileAccessDto>,
+    /// FTP overrides — only consulted when `file_access` is `ftp`/`ftps`.
+    /// `ftp_user`/`ftp_port` round-trip like `notes` (blank really means
+    /// "clear it"); `ftp_password` is secret like `password` — blank on
+    /// edit means "keep the stored value" (`upsert` preserves it).
+    #[serde(default)]
+    pub ftp_user: Option<String>,
+    #[serde(default)]
+    pub ftp_password: Option<String>,
+    #[serde(default)]
+    pub ftp_port: Option<u16>,
 }
 
 /// Live connection state for a host (tech-gui.md §4.1). Internally tagged so the
@@ -334,6 +351,8 @@ impl From<&Host> for HostDto {
             monitoring: host.monitoring.into(),
             monitor_port: host.monitor_port,
             file_access: host.file_access.into(),
+            ftp_user: host.ftp_user.clone(),
+            ftp_port: host.ftp_port,
         }
     }
 }
@@ -372,6 +391,10 @@ impl From<HostInputDto> for Host {
             // existing value over, same as it does for `monitoring`. A brand-new
             // host with no value given keeps the SFTP default.
             file_access: dto.file_access.map(Into::into).unwrap_or_default(),
+            ftp_user: non_empty(dto.ftp_user),
+            ftp_password: non_empty(dto.ftp_password),
+            // FTP port 0 isn't dialable either; drop it the same way monitor_port does.
+            ftp_port: dto.ftp_port.filter(|&p| p != 0),
             key_setup_date: None,
             password_auth_disabled: None,
         }
@@ -622,6 +645,9 @@ mod tests {
             monitoring: None,
             monitor_port: None,
             file_access: None,
+            ftp_user: None,
+            ftp_password: None,
+            ftp_port: None,
         }
     }
 
@@ -676,11 +702,16 @@ mod tests {
             monitoring: None,
             monitor_port: None,
             file_access: None,
+            ftp_user: Some(String::new()),
+            ftp_password: Some(String::new()),
+            ftp_port: None,
         });
         assert!(host.identity_file.is_none());
         assert!(host.password.is_none());
         assert!(host.proxy_jump.is_none());
         assert!(host.notes.is_none());
+        assert!(host.ftp_user.is_none());
+        assert!(host.ftp_password.is_none());
         assert!(!HostDto::from(&host).has_key);
     }
 

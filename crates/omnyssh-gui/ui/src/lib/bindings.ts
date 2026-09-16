@@ -441,7 +441,13 @@ export type FilePreview = { sessionId: number; path: string; content: string }
  * (tech-gui.md §3.4). `hasKey` reports whether an identity file is configured;
  * the key path itself never crosses the boundary.
  */
-export type HostDto = { name: string; hostname: string; user: string; port: number; tags: string[]; notes?: string | null; source: HostSourceDto; hasKey: boolean; passwordAuthDisabled?: boolean | null; monitoring: MonitorModeDto; monitorPort?: number | null; fileAccess: FileAccessDto }
+export type HostDto = { name: string; hostname: string; user: string; port: number; tags: string[]; notes?: string | null; source: HostSourceDto; hasKey: boolean; passwordAuthDisabled?: boolean | null; monitoring: MonitorModeDto; monitorPort?: number | null; fileAccess: FileAccessDto; 
+/**
+ * FTP login override, only meaningful when `fileAccess` is `ftp`/`ftps`.
+ * Not secret (unlike the FTP password, which never crosses the boundary),
+ * so it round-trips through the editor like `notes` does.
+ */
+ftpUser?: string | null; ftpPort?: number | null }
 /**
  * Inbound host form payload for `save_host` (tech-gui.md §4.1, Stage 4.1). Always
  * builds a **manual** `Host`: editing an SSH-config import saves a copy that shadows
@@ -450,7 +456,14 @@ export type HostDto = { name: string; hostname: string; user: string; port: numb
  * travel back out: the outbound `HostDto` omits both (§3.4). Inbound only, so it
  * derives `Deserialize` (not `Serialize`).
  */
-export type HostInputDto = { name: string; hostname: string; user: string; port: number; identityFile?: string | null; password?: string | null; proxyJump?: string | null; tags: string[]; notes?: string | null; monitoring?: MonitorModeDto | null; monitorPort?: number | null; fileAccess?: FileAccessDto | null }
+export type HostInputDto = { name: string; hostname: string; user: string; port: number; identityFile?: string | null; password?: string | null; proxyJump?: string | null; tags: string[]; notes?: string | null; monitoring?: MonitorModeDto | null; monitorPort?: number | null; fileAccess?: FileAccessDto | null; 
+/**
+ * FTP overrides — only consulted when `file_access` is `ftp`/`ftps`.
+ * `ftp_user`/`ftp_port` round-trip like `notes` (blank really means
+ * "clear it"); `ftp_password` is secret like `password` — blank on
+ * edit means "keep the stored value" (`upsert` preserves it).
+ */
+ftpUser?: string | null; ftpPassword?: string | null; ftpPort?: number | null }
 /**
  * Host origin, mirrors `omnyssh_core::ssh::client::HostSource`.
  */
