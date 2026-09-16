@@ -26,6 +26,9 @@ export interface HostFormFields {
   ftpPassword: string;
   /** FTP port override; blank means the standard FTP port (21). */
   ftpPort: string;
+  /** Active (vs. the default passive) mode for the FTP data connection —
+   *  a string so it binds to a themed `<Select>`, not a native checkbox. */
+  ftpMode: 'passive' | 'active';
 }
 
 export function emptyForm(): HostFormFields {
@@ -45,7 +48,8 @@ export function emptyForm(): HostFormFields {
     fileAccess: 'sftp',
     ftpUser: '',
     ftpPassword: '',
-    ftpPort: ''
+    ftpPort: '',
+    ftpMode: 'passive'
   };
 }
 
@@ -67,7 +71,8 @@ export function formFromHost(h: HostDto): HostFormFields {
     fileAccess: h.fileAccess,
     ftpUser: h.ftpUser ?? '',
     ftpPassword: '',
-    ftpPort: h.ftpPort == null ? '' : String(h.ftpPort)
+    ftpPort: h.ftpPort == null ? '' : String(h.ftpPort),
+    ftpMode: h.ftpActive ? 'active' : 'passive'
   };
 }
 
@@ -152,7 +157,8 @@ export function formToInput(f: HostFormFields): HostFormResult {
       fileAccess: f.fileAccess,
       ftpUser: ftpUser || undefined,
       ftpPassword: ftpPassword || undefined,
-      ftpPort
+      ftpPort,
+      ftpActive: f.ftpMode === 'active'
     }
   };
 }

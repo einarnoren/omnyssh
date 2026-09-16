@@ -45,7 +45,8 @@ describe('ipc event router', () => {
         source: 'manual',
         hasKey: false,
         monitoring: 'ssh',
-        fileAccess: 'sftp'
+        fileAccess: 'sftp',
+        ftpActive: false
       }
     ];
 
@@ -112,7 +113,7 @@ describe('ipc event router', () => {
     applyServicesDetected({ hostName: 'web-2', services: [{ kind: 'docker', metrics: [] }] });
 
     applyHostsLoaded([
-      { name: 'web-1', hostname: '10.0.0.1', user: 'root', port: 22, tags: [], source: 'manual', hasKey: false, monitoring: 'ssh', fileAccess: 'sftp' }
+      { name: 'web-1', hostname: '10.0.0.1', user: 'root', port: 22, tags: [], source: 'manual', hasKey: false, monitoring: 'ssh', fileAccess: 'sftp', ftpActive: false }
     ]);
 
     expect(get(statuses).has('web-2')).toBe(false);

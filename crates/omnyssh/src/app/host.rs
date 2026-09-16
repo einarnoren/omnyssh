@@ -25,6 +25,7 @@ pub const FORM_FIELD_LABELS: &[&str] = &[
     "FTP User (blank = same as SSH User)",
     "FTP Password (blank = same as SSH Password)",
     "FTP Port (blank = 21)",
+    "FTP Mode (passive | active)",
 ];
 
 /// Whether an edit changed anything a running poller reads. Everything else on
@@ -92,6 +93,28 @@ fn parse_file_access(value: &str) -> Result<FileAccess, String> {
         "none" => Ok(FileAccess::None),
         other => Err(format!(
             "File Access must be 'sftp', 'ftp', 'ftps' or 'none', got '{other}'"
+        )),
+    }
+}
+
+/// Renders a host's FTP data-connection mode back into its form field.
+fn ftp_active_value(host: &Host) -> &'static str {
+    if host.ftp_active {
+        "active"
+    } else {
+        ""
+    }
+}
+
+/// Parses the FTP mode field: empty or `passive` keeps the default (works
+/// through almost every NAT/firewall); `active` is only for the rare server
+/// that requires it.
+fn parse_ftp_active(value: &str) -> Result<bool, String> {
+    match value {
+        "" | "passive" => Ok(false),
+        "active" => Ok(true),
+        other => Err(format!(
+            "FTP Mode must be 'passive' or 'active', got '{other}'"
         )),
     }
 }
@@ -172,6 +195,7 @@ impl HostForm {
         form.fields[12] = FormField::with_value(
             host.ftp_port.map(|p| p.to_string()).unwrap_or_default(),
         );
+        form.fields[13] = FormField::with_value(ftp_active_value(host));
         form
     }
 
@@ -276,6 +300,8 @@ impl HostForm {
             }
         };
 
+        let ftp_active = parse_ftp_active(self.fields[13].value.trim())?;
+
         Ok(Host {
             name,
             hostname,
@@ -294,6 +320,7 @@ impl HostForm {
             ftp_user,
             ftp_password,
             ftp_port,
+            ftp_active,
             key_setup_date: None,
             password_auth_disabled: None,
         })
@@ -887,6 +914,26 @@ mod tests {
             form.fields[12] = FormField::with_value(text);
             let err = form.to_host(HostSource::Manual).unwrap_err();
             assert!(err.contains("FTP Port"), "'{text}': {err}");
+        }
+    }
+
+    #[test]
+    fn ftp_active_mode_round_trips_through_the_form() {
+        for (text, active) in [("", false), ("passive", false), ("active", true)] {
+            assert_eq!(parse_ftp_active(text), Ok(active), "parsing '{text}'");
+
+            let host = Host {
+                ftp_active: active,
+                ..Host::default()
+            };
+            assert_eq!(parse_ftp_active(ftp_active_value(&host)), Ok(active));
+        }
+    }
+
+    #[test]
+    fn an_unusable_ftp_mode_is_rejected() {
+        for text in ["Active", "on", "PASV"] {
+            assert!(parse_ftp_active(text).is_err(), "'{text}' should be rejected");
         }
     }
 

@@ -17,6 +17,7 @@ function host(partial: Partial<HostDto>): HostDto {
     hasKey: false,
     monitoring: 'ssh',
     fileAccess: 'sftp',
+    ftpActive: false,
     ...partial
   };
 }
@@ -129,7 +130,8 @@ describe('formFromHost', () => {
       notes: 'x',
       monitoring: 'ssh',
       monitorPort: undefined,
-      fileAccess: 'sftp'
+      fileAccess: 'sftp',
+      ftpActive: false
     });
   });
 });
@@ -263,5 +265,28 @@ describe('formToInput — FTP overrides', () => {
     expect(fields.ftpUser).toBe('ftpuser');
     expect(fields.ftpPort).toBe('2121');
     expect(fields.ftpPassword).toBe('');
+  });
+
+  it('defaults to passive mode', () => {
+    const result = formToInput({ ...emptyForm(), name: 'nas', hostname: '10.0.0.5', fileAccess: 'ftp' });
+    expect(result.ok && result.input.ftpActive).toBe(false);
+  });
+
+  it('carries active mode through to the input', () => {
+    const result = formToInput({
+      ...emptyForm(),
+      name: 'nas',
+      hostname: '10.0.0.5',
+      fileAccess: 'ftp',
+      ftpMode: 'active'
+    });
+    expect(result.ok && result.input.ftpActive).toBe(true);
+  });
+
+  it('round-trips active mode through the edit form', () => {
+    const fields = formFromHost(host({ fileAccess: 'ftp', ftpActive: true }));
+    expect(fields.ftpMode).toBe('active');
+    const r = formToInput(fields);
+    expect(r.ok && r.input.ftpActive).toBe(true);
   });
 });

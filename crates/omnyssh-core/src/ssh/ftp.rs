@@ -12,6 +12,7 @@
 //! device whose FTP login or port genuinely differs from its SSH one.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use async_trait::async_trait;
@@ -30,6 +31,10 @@ use crate::ssh::sftp::FileEntry;
 /// The FTP protocol's own well-known port; unrelated to `Host::port`, which
 /// is the SSH port used for the shell.
 const FTP_PORT: u16 = 21;
+
+/// How long an active-mode data listener waits for the server to connect
+/// back, matching this codebase's other command-level timeouts.
+const ACTIVE_MODE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A plain-FTP or an explicit-FTPS control connection.
 ///
@@ -78,6 +83,17 @@ impl FtpBackend {
                 anyhow::bail!("FtpBackend::connect called for a non-FTP file_access")
             }
         };
+
+        // Passive (the suppaftp default) works through almost every NAT/firewall
+        // by having the client open the data connection; active mode is only for
+        // the rare server that instead requires the client to listen and the
+        // server to connect back.
+        if host.ftp_active {
+            conn = match conn {
+                FtpConn::Plain(c) => FtpConn::Plain(c.active_mode(ACTIVE_MODE_TIMEOUT)),
+                FtpConn::Tls(c) => FtpConn::Tls(Box::new(c.active_mode(ACTIVE_MODE_TIMEOUT))),
+            };
+        }
 
         let user = host.ftp_user.as_deref().unwrap_or(&host.user);
         let password = host

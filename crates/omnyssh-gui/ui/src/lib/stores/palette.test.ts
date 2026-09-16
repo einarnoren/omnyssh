@@ -15,6 +15,7 @@ function host(name: string, extra: Partial<HostDto> = {}): HostDto {
     hasKey: false,
     monitoring: 'ssh',
     fileAccess: 'sftp',
+    ftpActive: false,
     ...extra
   };
 }

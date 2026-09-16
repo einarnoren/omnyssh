@@ -447,7 +447,11 @@ export type HostDto = { name: string; hostname: string; user: string; port: numb
  * Not secret (unlike the FTP password, which never crosses the boundary),
  * so it round-trips through the editor like `notes` does.
  */
-ftpUser?: string | null; ftpPort?: number | null }
+ftpUser?: string | null; ftpPort?: number | null; 
+/**
+ * Active (vs. the default passive) mode for the FTP data connection.
+ */
+ftpActive: boolean }
 /**
  * Inbound host form payload for `save_host` (tech-gui.md §4.1, Stage 4.1). Always
  * builds a **manual** `Host`: editing an SSH-config import saves a copy that shadows
@@ -463,7 +467,7 @@ export type HostInputDto = { name: string; hostname: string; user: string; port:
  * "clear it"); `ftp_password` is secret like `password` — blank on
  * edit means "keep the stored value" (`upsert` preserves it).
  */
-ftpUser?: string | null; ftpPassword?: string | null; ftpPort?: number | null }
+ftpUser?: string | null; ftpPassword?: string | null; ftpPort?: number | null; ftpActive?: boolean }
 /**
  * Host origin, mirrors `omnyssh_core::ssh::client::HostSource`.
  */

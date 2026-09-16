@@ -5,7 +5,7 @@ import type { HostServices } from '$lib/stores/services';
 import { deriveCard, metricStatus, QUICK_ACTIONS, filterHosts } from './serverCard';
 
 function host(name = 'web-1'): HostDto {
-  return { name, hostname: '10.0.0.1', user: 'root', port: 22, tags: [], source: 'manual', hasKey: false, monitoring: 'ssh', fileAccess: 'sftp' };
+  return { name, hostname: '10.0.0.1', user: 'root', port: 22, tags: [], source: 'manual', hasKey: false, monitoring: 'ssh', fileAccess: 'sftp', ftpActive: false };
 }
 
 function tcpHost(name = 'fw-1'): HostDto {

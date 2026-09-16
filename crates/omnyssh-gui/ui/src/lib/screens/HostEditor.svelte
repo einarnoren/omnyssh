@@ -195,16 +195,25 @@
             <input bind:value={fields.ftpPort} inputmode="numeric" class={field} placeholder="21" />
           </label>
         </div>
-        <label class={label}>
-          <span>FTP password</span>
-          <input
-            type="password"
-            bind:value={fields.ftpPassword}
-            class={field}
-            placeholder={mode === 'edit' ? 'Leave blank to keep the current value' : fields.password || 'Same as SSH password'}
-            autocomplete="off"
-          />
-        </label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class={label}>
+            <span>FTP password</span>
+            <input
+              type="password"
+              bind:value={fields.ftpPassword}
+              class={field}
+              placeholder={mode === 'edit' ? 'Leave blank to keep the current value' : fields.password || 'Same as SSH password'}
+              autocomplete="off"
+            />
+          </label>
+          <label class={label}>
+            <span>FTP mode</span>
+            <Select bind:value={fields.ftpMode} class={field}>
+              <option value="passive">Passive</option>
+              <option value="active">Active</option>
+            </Select>
+          </label>
+        </div>
       {:else if fields.fileAccess === 'none'}
         <p class="text-xs text-faint">Hides the Files tab for this host.</p>
       {/if}

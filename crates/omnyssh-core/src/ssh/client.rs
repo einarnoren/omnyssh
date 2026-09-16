@@ -126,6 +126,11 @@ pub struct Host {
     /// unset — never to `port`, which is the SSH port.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ftp_port: Option<u16>,
+    /// Use active mode (`PORT`) instead of passive (`PASV`) for the FTP data
+    /// connection. Passive is the default and works through almost every NAT
+    /// / firewall; active is only for the rare server that requires it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub ftp_active: bool,
 
     // -----------------------------------------------------------------------
     // Auto SSH Key Setup metadata
@@ -148,6 +153,11 @@ fn default_port() -> u16 {
     22
 }
 
+/// Lets the default (passive mode) stay out of `hosts.toml` entirely.
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 impl Default for Host {
     fn default() -> Self {
         Self {
@@ -168,6 +178,7 @@ impl Default for Host {
             ftp_user: None,
             ftp_password: None,
             ftp_port: None,
+            ftp_active: false,
             key_setup_date: None,
             password_auth_disabled: None,
         }
@@ -260,6 +271,27 @@ mod tests {
         assert_eq!(read.ftp_user.as_deref(), Some("ftpuser"));
         assert_eq!(read.ftp_password.as_deref(), Some("ftppass"));
         assert_eq!(read.ftp_port, Some(2121));
+    }
+
+    /// Same guarantee as the other FTP settings: passive (the default) stays
+    /// out of `hosts.toml`, and an explicit active-mode choice persists.
+    #[test]
+    fn ftp_active_mode_round_trips_and_stays_out_when_default() {
+        let host: Host = toml::from_str("name = \"web\"\nhostname = \"10.0.0.1\"\n")
+            .expect("a host without ftp_active still parses");
+        assert!(!host.ftp_active);
+        let written = toml::to_string(&host).expect("serialize");
+        assert!(!written.contains("ftp_active"), "{written}");
+
+        let active = Host {
+            name: String::from("nas"),
+            hostname: String::from("10.0.0.5"),
+            ftp_active: true,
+            ..Host::default()
+        };
+        let written = toml::to_string(&active).expect("serialize");
+        let read: Host = toml::from_str(&written).expect("deserialize");
+        assert!(read.ftp_active);
     }
 
     /// The wire and the TUI form spell the mode differently, so a hand-edited

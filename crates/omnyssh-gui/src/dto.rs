@@ -110,6 +110,8 @@ pub struct HostDto {
     pub ftp_user: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ftp_port: Option<u16>,
+    /// Active (vs. the default passive) mode for the FTP data connection.
+    pub ftp_active: bool,
 }
 
 /// Inbound host form payload for `save_host` (tech-gui.md §4.1, Stage 4.1). Always
@@ -154,6 +156,8 @@ pub struct HostInputDto {
     pub ftp_password: Option<String>,
     #[serde(default)]
     pub ftp_port: Option<u16>,
+    #[serde(default)]
+    pub ftp_active: bool,
 }
 
 /// Live connection state for a host (tech-gui.md §4.1). Internally tagged so the
@@ -353,6 +357,7 @@ impl From<&Host> for HostDto {
             file_access: host.file_access.into(),
             ftp_user: host.ftp_user.clone(),
             ftp_port: host.ftp_port,
+            ftp_active: host.ftp_active,
         }
     }
 }
@@ -395,6 +400,7 @@ impl From<HostInputDto> for Host {
             ftp_password: non_empty(dto.ftp_password),
             // FTP port 0 isn't dialable either; drop it the same way monitor_port does.
             ftp_port: dto.ftp_port.filter(|&p| p != 0),
+            ftp_active: dto.ftp_active,
             key_setup_date: None,
             password_auth_disabled: None,
         }
@@ -648,6 +654,7 @@ mod tests {
             ftp_user: None,
             ftp_password: None,
             ftp_port: None,
+            ftp_active: false,
         }
     }
 
@@ -705,6 +712,7 @@ mod tests {
             ftp_user: Some(String::new()),
             ftp_password: Some(String::new()),
             ftp_port: None,
+            ftp_active: false,
         });
         assert!(host.identity_file.is_none());
         assert!(host.password.is_none());

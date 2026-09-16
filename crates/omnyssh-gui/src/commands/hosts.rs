@@ -191,6 +191,7 @@ mod tests {
             ftp_user: None,
             ftp_password: None,
             ftp_port: None,
+            ftp_active: false,
         }
     }
 
