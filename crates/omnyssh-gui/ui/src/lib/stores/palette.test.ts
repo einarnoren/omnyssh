@@ -150,4 +150,9 @@ describe('palette store — modes & picker resolution', () => {
     await expect(pending).resolves.toBeNull();
     expect(get(palette)).toEqual({ open: true, mode: 'navigate' });
   });
+
+  it('pickHost(kind) records which session kind the pick is for', () => {
+    palette.pickHost('sftp');
+    expect(get(palette)).toEqual({ open: true, mode: 'pickHost', pickKind: 'sftp' });
+  });
 });

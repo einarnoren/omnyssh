@@ -26,6 +26,15 @@
   const firstSession = $derived(items.findIndex((it) => it.kind === 'session'));
   const firstHost = $derived(items.findIndex((it) => it.kind === 'host'));
 
+  // A host picked for a Files session that has file access disabled would just fail
+  // right after picking it; flagging it here lets the user pick a different one
+  // instead of finding out from an error a moment later. Still selectable — the
+  // resulting error message is already clear on its own — so a keyboard-only user
+  // hitting Enter is never stuck on an inert row.
+  function noFileAccess(item: (typeof items)[number]): boolean {
+    return $palette.mode === 'pickHost' && $palette.pickKind === 'sftp' && item.kind === 'host' && item.host.fileAccess === 'none';
+  }
+
   const placeholder = $derived(
     $palette.mode === 'pickHost' ? 'Pick a host…' : 'Search hosts and sessions…'
   );
@@ -201,10 +210,16 @@
                   <span class="min-w-0 flex-1 truncate">{sessionLabel(item.session)}</span>
                 {:else}
                   <StatusDot status={hostStatusDot($statuses.get(item.host.name))} />
-                  <span class="min-w-0 flex-1 truncate font-medium">{item.host.name}</span>
-                  <span class="shrink-0 truncate font-mono text-xs {selected === i ? '' : 'text-faint'}">
-                    {item.host.user}@{displayHostname(item.host.hostname, $streamerMode)}
+                  <span class="min-w-0 flex-1 truncate font-medium {noFileAccess(item) ? 'opacity-50' : ''}">
+                    {item.host.name}
                   </span>
+                  {#if noFileAccess(item)}
+                    <span class="shrink-0 text-xs {selected === i ? '' : 'text-faint'}">no file access</span>
+                  {:else}
+                    <span class="shrink-0 truncate font-mono text-xs {selected === i ? '' : 'text-faint'}">
+                      {item.host.user}@{displayHostname(item.host.hostname, $streamerMode)}
+                    </span>
+                  {/if}
                 {/if}
               </button>
             </li>

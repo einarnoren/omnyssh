@@ -1,7 +1,7 @@
 import { writable } from 'svelte/store';
 import type { ConnectionStatusDto, HostDto } from '$lib/bindings';
 import type { Status } from '$lib/theme';
-import type { Session } from './sessions';
+import type { Session, SessionKind } from './sessions';
 
 // The ⌘K overlay and the host-picker are one component in two modes (tech-gui.md §2):
 // `navigate` lists open sessions + hosts (jump to a session, or open a host); `pickHost`
@@ -82,6 +82,10 @@ export function hostStatusDot(status: ConnectionStatusDto | undefined): Status {
 export interface PaletteState {
   open: boolean;
   mode: PaletteMode;
+  /** Set only in `pickHost` mode: which kind of session the pick is for, so the
+   *  picker can flag a host that can't actually serve it (e.g. `fileAccess: 'none'`
+   *  for a `sftp` pick) instead of only failing after the fact. */
+  pickKind?: SessionKind;
 }
 
 function createPalette() {
@@ -103,10 +107,11 @@ function createPalette() {
       settle(null);
       set({ open: true, mode: 'navigate' });
     },
-    /** Action-scoped host picker; resolves with the chosen host, or null if dismissed. */
-    pickHost(): Promise<HostDto | null> {
+    /** Action-scoped host picker; resolves with the chosen host, or null if dismissed.
+     *  `kind` flags hosts in the list that can't serve it. */
+    pickHost(kind?: SessionKind): Promise<HostDto | null> {
       settle(null);
-      set({ open: true, mode: 'pickHost' });
+      set({ open: true, mode: 'pickHost', pickKind: kind });
       return new Promise((resolve) => (pending = resolve));
     },
     /** Picker mode: hand the chosen host back to the caller and close. */

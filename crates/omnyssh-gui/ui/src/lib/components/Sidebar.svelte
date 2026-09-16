@@ -23,7 +23,7 @@
   // Action-first spawn (tech-gui.md §2): a spawner opens the host-picker, then creates
   // a session of its kind for the chosen host. A dismissed picker spawns nothing.
   async function pickAndSpawn(kind: SessionKind): Promise<void> {
-    const host = await palette.pickHost();
+    const host = await palette.pickHost(kind);
     if (host) spawnSession(kind, host.name);
   }
 
